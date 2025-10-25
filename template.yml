@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SmartHomeSkill Lambda (dev/prod, safe secrets, canary deploy)
+
+Parameters:
+  EnvName:
+    Type: String
+    AllowedValues: [dev, prod]
+  FunctionName:
+    Type: String
+    Default: smarthomeskill-SmartHomeFunction
+  MemorySize:
+    Type: Number
+    Default: 256
+  Timeout:
+    Type: Number
+    Default: 30
+  AnthropicKeyParamName:
+    Type: String
+    Default: !Sub "/nature-talk/${EnvName}/anthropic_api_key"
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Handler: lambda_function.lambda_handler
+    MemorySize: !Ref MemorySize
+    Timeout: !Ref Timeout
+    Tracing: Active
+    Environment:
+      Variables:
+        APP_ENV: !Ref EnvName
+        # 機密は SSM から取得（SDK側で GetParameter を呼ぶ実装に合わせる）
+        ANTHROPIC_API_KEY_PARAM: !Ref AnthropicKeyParamName
+
+Resources:
+  SmartHomeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      CodeUri: ./src
+      Architectures: [x86_64]
+      EphemeralStorage:
+        Size: 512
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: "*"   # 本番は対象パラメータに絞ることを推奨
+      AutoPublishAlias: !Ref EnvName
+      DeploymentPreference:
+        Type: Linear10PercentEvery1Minute
+      Events:
+        AlexaSkillEvent:
+          Type: AlexaSkill   # Alexa からの呼び出し権限付与（Skill本体は別管理）
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt SmartHomeFunction.Arn
