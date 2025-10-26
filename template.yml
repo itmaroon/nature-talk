@@ -27,6 +27,8 @@ Resources:
       Handler: lambda_function.lambda_handler
       Architectures: [x86_64]
       AutoPublishAlias: live        # 安定運用のため固定エイリアス
+      Timeout: 20
+      MemorySize: 512
       Policies:
         - AWSLambdaBasicExecutionRole
         # SSM / Secrets 取得の権限（最小化したい場合は ARN を絞ってください）
@@ -48,13 +50,6 @@ Resources:
           Type: AlexaSkill
           Properties:
             SkillId: !Ref AlexaSkillId
-
-  # 任意：ログ保持期間を固定したい場合
-  FunctionLogs:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/lambda/${FunctionName}"
-      RetentionInDays: 14
 
 Outputs:
   FunctionArn:
