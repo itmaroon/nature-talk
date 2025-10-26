@@ -1,60 +1,65 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: SmartHomeSkill Lambda (dev/prod, safe secrets, canary deploy)
+Description: nature-talk Lambda (Custom Skill) with Secrets/SSM at runtime
 
 Parameters:
+  ProjectName:
+    Type: String
+    Default: nature-talk
   EnvName:
     Type: String
     AllowedValues: [dev, prod]
+    Default: prod
   FunctionName:
     Type: String
-    Default: smarthomeskill-SmartHomeFunction
-  MemorySize:
-    Type: Number
-    Default: 256
-  Timeout:
-    Type: Number
-    Default: 30
-  AnthropicKeyParamName:
+    Default: nature-talk-fn
+  AlexaSkillId:
     Type: String
-    Default: !Sub "/nature-talk/${EnvName}/anthropic_api_key"
-
-Globals:
-  Function:
-    Runtime: python3.12
-    Handler: lambda_function.lambda_handler
-    MemorySize: !Ref MemorySize
-    Timeout: !Ref Timeout
-    Tracing: Active
-    Environment:
-      Variables:
-        APP_ENV: !Ref EnvName
-        # 機密は SSM から取得（SDK側で GetParameter を呼ぶ実装に合わせる）
-        ANTHROPIC_API_KEY_PARAM: !Ref AnthropicKeyParamName
+    Description: "amzn1.ask.skill.xxxx-xxxx-xxxx-xxxx"
 
 Resources:
   SmartHomeFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Ref FunctionName
-      CodeUri: ./src
+      CodeUri: src/
+      Runtime: python3.11           # ← あなたの環境でビルド成功したバージョン
+      Handler: lambda_function.lambda_handler
       Architectures: [x86_64]
-      EphemeralStorage:
-        Size: 512
+      AutoPublishAlias: live        # 安定運用のため固定エイリアス
       Policies:
         - AWSLambdaBasicExecutionRole
+        # SSM / Secrets 取得の権限（最小化したい場合は ARN を絞ってください）
         - Statement:
             - Effect: Allow
-              Action:
-                - ssm:GetParameter
-              Resource: "*"   # 本番は対象パラメータに絞ることを推奨
-      AutoPublishAlias: !Ref EnvName
-      DeploymentPreference:
-        Type: Linear10PercentEvery1Minute
+              Action: ssm:GetParameter
+              Resource: "*"
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: "*"
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          # 実行時に参照する“名前”（値はテンプレートに含めない）
+          ANTHROPIC_API_KEY_PARAM: !Sub "/${ProjectName}/${EnvName}/anthropic_api_key"
+          ANTHROPIC_SECRET_ID: !Sub "${ProjectName}/anthropic"
       Events:
-        AlexaSkillEvent:
-          Type: AlexaSkill   # Alexa からの呼び出し権限付与（Skill本体は別管理）
+        FromAlexa:
+          Type: AlexaSkill
+          Properties:
+            SkillId: !Ref AlexaSkillId
+
+  # 任意：ログ保持期間を固定したい場合
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${FunctionName}"
+      RetentionInDays: 14
 
 Outputs:
   FunctionArn:
-    Value: !GetAtt SmartHomeFunction.Arn
+    Value: !Ref SmartHomeFunction
+    Description: Function logical ID (alias-managed)
+  AliasArn:
+    Value: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}:live"
+    Description: Use this ARN in Alexa Endpoint (Default Region)
